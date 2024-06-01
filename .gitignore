@@ -131,4 +131,7 @@ dmypy.json
 sandbox.py
 waypoint_traj.py
 
-.zip
+*.zip
+
+rl/logs/*
+./rl/saved_policies/*
