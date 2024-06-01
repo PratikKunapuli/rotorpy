@@ -1,4 +1,5 @@
 import numpy as np
+import random
 """
 Lissajous curves are defined by trigonometric functions parameterized in time. 
 See https://en.wikipedia.org/wiki/Lissajous_curve
@@ -9,7 +10,7 @@ class TwoDLissajous(object):
     The standard Lissajous on the XY curve as defined by https://en.wikipedia.org/wiki/Lissajous_curve
     This is planar in the XY plane at a fixed height. 
     """
-    def __init__(self, A=1, B=1, a=1, b=1, delta=0, height=0, yaw_bool=False):
+    def __init__(self, A=1, B=1, a=1, b=1, delta=0, height=0, yaw_bool=False, dt=0.01, seed=2024, fixed_seed = False, env_diff_seed=True):
         """
         This is the constructor for the Trajectory object. A fresh trajectory
         object will be constructed before each mission.
@@ -30,6 +31,39 @@ class TwoDLissajous(object):
         self.height = height
 
         self.yaw_bool = yaw_bool
+
+        self.seed = seed
+        self.fixed_seed = fixed_seed
+        self.env_diff_seed = env_diff_seed
+        self.reset_count = 0
+
+        self.dt = dt
+        self.future_buffer = np.zeros((10,3))
+        self.fill_buffer(t=0)
+
+    def gen_coefficients(self):
+        self.A = np.random.uniform(-2, 2)
+        self.B = np.random.uniform(-2, 2)
+        self.a = np.random.uniform(0.25, 2)
+        self.b = np.random.uniform(0.25, 2)
+        self.delta = np.random.uniform(0, 2*np.pi)
+
+    def reset(self):
+        """
+        Reset the trajectory to the initial conditions and randomize the parameters
+        """
+        if self.fixed_seed:
+            np.random.seed(self.seed)
+        elif self.env_diff_seed and self.reset_count > 0:
+            np.random.seed(random.randint(0, 1000000))
+
+        self.coeff = self.generate_coeff()
+
+        self.reset_count += 1
+        self.gen_coefficients()
+
+        self.fill_buffer(t=0)
+    
 
     def update(self, t):
         """
@@ -73,5 +107,12 @@ class TwoDLissajous(object):
             yaw_ddot = 0
 
         flat_output = { 'x':x, 'x_dot':x_dot, 'x_ddot':x_ddot, 'x_dddot':x_dddot, 'x_ddddot':x_ddddot,
-                        'yaw':yaw, 'yaw_dot':yaw_dot, 'yaw_ddot':yaw_ddot}
+                        'yaw':yaw, 'yaw_dot':yaw_dot, 'yaw_ddot':yaw_ddot, 'future_pos': self.future_buffer}
         return flat_output
+    
+    def fill_buffer(self, t=0):
+        """
+        This function fills the buffer with future desired states. 
+        """
+        for i in range(10):
+            self.future_buffer[i] = self.update(t + i*self.dt)['x']

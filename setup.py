@@ -20,4 +20,5 @@ setup(
             'ndsplines',
             'timeout_decorator',
             'tqdm',
-            'gymnasium'])
+            'gymnasium',
+            'argparse']) #added new
