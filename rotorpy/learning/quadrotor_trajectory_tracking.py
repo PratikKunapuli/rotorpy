@@ -300,6 +300,19 @@ class QuadrotorTrackingEnv(gym.Env):
         
         # Update the quadrotor model with the new parameters
         self.quadrotor = MultirotorModelMismatch(quad_params=quad_params_copy, initial_state=state, control_abstraction=self.control_mode, aero=self.aero, assumed_quad_params=self.assumed_quad_params)
+    
+        # Set up scaling of the action space
+        self.rotor_speed_max = self.assumed_quad_params['rotor_speed_max']
+        self.rotor_speed_min = self.assumed_quad_params['rotor_speed_min']
+
+        # Compute the min/max thrust by assuming the rotor is spinning at min/max speed. (also generalizes to bidirectional rotors)
+        self.max_thrust = self.assumed_quad_params['k_eta'] * self.rotor_speed_max**2
+        self.min_thrust = self.assumed_quad_params['k_eta'] * self.rotor_speed_min**2
+
+        # Find the maximum moment on each axis, N-m
+        self.max_roll_moment = self.max_thrust * np.abs(self.assumed_quad_params['rotor_pos']['r1'][1])
+        self.max_pitch_moment = self.max_thrust * np.abs(self.assumed_quad_params['rotor_pos']['r1'][0])
+        self.max_yaw_moment = self.assumed_quad_params['k_m'] * self.rotor_speed_max**2
 
         # Set the initial state. 
         self.vehicle_state = state
@@ -478,8 +491,8 @@ class QuadrotorTrackingEnv(gym.Env):
         return True
     
     def _get_obs(self):
-        current_state = np.hstack([self.vehicle_state['x'], self.vehicle_state['v'], self.vehicle_state['q'], self.vehicle_state['w']])
-        obs = current_state
+        self.current_state = np.hstack([self.vehicle_state['x'], self.vehicle_state['v'], self.vehicle_state['q'], self.vehicle_state['w']])
+        obs = self.current_state
         if self.experiment_dict.get('fb_body_frame', True):
             pos = self.vehicle_state['x']
             rot = Rotation.from_quat(self.vehicle_state['q'])
@@ -515,6 +528,12 @@ class QuadrotorTrackingEnv(gym.Env):
         
 
         return obs
+
+    def _get_current_state(self):
+        return self.current_state
+    
+    def _get_current_reference(self):
+        return self.ref.update(self.t)
     
     def l1_simulation(self):
         vel = self.vehicle_state['v']
