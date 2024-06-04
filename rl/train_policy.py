@@ -94,25 +94,13 @@ def train():
     # Set up Env
     reward_function = datt_reward if args.reward == 'datt' else hover_reward
     experiment_dict = load_experiment(args.config)
+    # TODO add more configurability here
     if args.ref == "lissajous_ref":
         traj = TwoDLissajous(A=1, B=1, a=1, b=2, delta=0, height=0.5, yaw_bool=False, dt=1/args.rate, seed = 2024, fixed_seed = False, env_diff_seed=True)
     else:
         raise NotImplementedError
 
-    env_class = QuadrotorTrackingEnv
-    env_kwargs = {
-        'quad_params': quad_params,
-        'experiment_dict': experiment_dict,
-        'render_mode': 'None',
-        'reference': traj,
-        'reward_fn': reward_function,
-        'sim_rate': args.rate,
-    }
-
-    if issubclass(env_class, VecEnv):
-      env = VecMonitor(env_class(args.n_envs))
-    else:
-      env = make_vec_env(env_class, n_envs=args.n_envs, env_kwargs=env_kwargs)
+    
 
     
     # Set up Policy
@@ -158,6 +146,21 @@ def train():
             print("Using policy: RPG")
         else:
             raise NotImplementedError
+
+        env_class = QuadrotorTrackingEnv
+        env_kwargs = {
+            'quad_params': quad_params,
+            'experiment_dict': experiment_dict,
+            'render_mode': 'None',
+            'reference': traj,
+            'reward_fn': reward_function,
+            'sim_rate': args.rate,
+        }
+
+        if issubclass(env_class, VecEnv):
+            env = VecMonitor(env_class(args.n_envs))
+        else:
+            env = make_vec_env(env_class, n_envs=args.n_envs, env_kwargs=env_kwargs)
         
         kwargs = {}
         policy: BaseAlgorithm = algo_class(
@@ -170,7 +173,22 @@ def train():
             **kwargs
         )
     else:
-        policy: BaseAlgorithm = algo_class.load(SAVED_POLICY_DIR / f'{args.name}.zip', env)
+        env_class = QuadrotorTrackingEnv
+        experiment_dict['reference_randomize_threshold'] = 0 # begin randomizing the reference trajectory immediately
+        env_kwargs = {
+            'quad_params': quad_params,
+            'experiment_dict': experiment_dict,
+            'render_mode': 'None',
+            'reference': traj,
+            'reward_fn': reward_function,
+            'sim_rate': args.rate,
+        }
+
+        if issubclass(env_class, VecEnv):
+            env = VecMonitor(env_class(args.n_envs))
+        else:
+            env = make_vec_env(env_class, n_envs=args.n_envs, env_kwargs=env_kwargs)
+        policy: BaseAlgorithm = algo_class.load(SAVED_POLICY_DIR / f'{args.name}.zip', env, device=f'cuda:{args.device}')
         print('CONTINUING TRAINING!')
 
     if args.checkpoint:

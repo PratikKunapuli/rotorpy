@@ -187,10 +187,10 @@ class Multirotor(object):
         s = Multirotor._pack_state(state)
 
         # Option 1 - RK45 integration
-        sol = scipy.integrate.solve_ivp(s_dot_fn, (0, t_step), s, first_step=t_step)
-        s = sol['y'][:,-1]
+        # sol = scipy.integrate.solve_ivp(s_dot_fn, (0, t_step), s, first_step=t_step)
+        # s = sol['y'][:,-1]
         # Option 2 - Euler integration
-        # s = s + s_dot_fn(0, s) * t_step  # first argument doesn't matter. It's time invariant model
+        s = s + s_dot_fn(0, s) * t_step  # first argument doesn't matter. It's time invariant model
 
         state = Multirotor._unpack_state(s)
 

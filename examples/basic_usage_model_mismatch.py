@@ -7,6 +7,7 @@ from rotorpy.environments import Environment
 # Vehicles. Currently there is only one. 
 # There must also be a corresponding parameter file. 
 from rotorpy.vehicles.multirotor import Multirotor
+from rotorpy.vehicles.multirotor_model_mismatch import MultirotorModelMismatch
 from rotorpy.vehicles.crazyflie_params import quad_params
 # from rotorpy.vehicles.hummingbird_params import quad_params  # There's also the Hummingbird
 
@@ -49,18 +50,24 @@ Instantiation
 
 sim_dt = 0.01
 
-trajectory = TwoDLissajous(A=2, B=2, a=0.25, b=2, delta=0, height=1, yaw_bool=False, dt=sim_dt)
+trajectory = TwoDLissajous(A=2, B=1, a=1, b=2, delta=0, height=1, yaw_bool=False, dt=sim_dt)
 
 
 # Obstacle maps can be loaded in from a JSON file using the World.from_file(path) method. Here we are loading in from 
 # an existing file under the rotorpy/worlds/ directory. However, you can create your own world by following the template
 # provided (see rotorpy/worlds/README.md), and load that file anywhere using the appropriate path.
 world = World.from_file(os.path.abspath(os.path.join(os.path.dirname(__file__),'..','rotorpy','worlds','double_pillar.json')))
-world = None
+
+import copy
+assumed_params = copy.deepcopy(quad_params)
+assumed_params['mass'] = 0.03
+
+quad_params['mass'] = 0.04 # 2 grams heavier
+
 # "world" is an optional argument. If you don't load a world it'll just provide an empty playground! 
 
 # An instance of the simulator can be generated as follows: 
-sim_instance = Environment(vehicle=Multirotor(quad_params, control_abstraction='cmd_ctbr'),           # vehicle object, must be specified. 
+sim_instance = Environment(vehicle=MultirotorModelMismatch(quad_params, control_abstraction='cmd_ctbr', assumed_quad_params=assumed_params),           # vehicle object, must be specified. 
                            controller=SE3Control(quad_params),        # controller object, must be specified.
                            trajectory=trajectory,                     # trajectory object, must be specified.
                            wind_profile=NoWind(),               # OPTIONAL: wind profile object, if none is supplied it will choose no wind. 
@@ -104,7 +111,7 @@ results = sim_instance.run(t_final      = 20,       # The maximum duration of th
                            animate_bool    = True,     # Boolean: determines if the animation of vehicle state will play. 
                            animate_wind    = True,    # Boolean: determines if the animation will include a scaled wind vector to indicate the local wind acting on the UAV. 
                            verbose         = True,     # Boolean: will print statistics regarding the simulation. 
-                           fname   = "basic_usage" # Filename is specified if you want to save the animation. The save location is rotorpy/data_out/. 
+                           fname   = "basic_usage_model_mismatch" # Filename is specified if you want to save the animation. The save location is rotorpy/data_out/. 
                     )
 
 # There are booleans for if you want to plot all/some of the results, animate the multirotor, and 

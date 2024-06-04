@@ -49,6 +49,8 @@ class MultirotorModelMismatch(object):
                                 'cmd_ctatt': the controller commands a collective thrust and attitude (as a quaternion).
                                 'cmd_vel': the controller commands a velocity vector in the body frame. 
         aero: boolean, determines whether or not aerodynamic drag forces are computed. 
+        assumed_quad_params: a dictionary containing the assumed physical parameters for the multirotor.
+        integration_method: the method used for integration. Default is "RK45". "Euler" is also an option.
     """
     def __init__(self, quad_params, initial_state = {'x': np.array([0,0,0]),
                                             'v': np.zeros(3,),
@@ -58,7 +60,8 @@ class MultirotorModelMismatch(object):
                                             'rotor_speeds': np.array([1788.53, 1788.53, 1788.53, 1788.53])},
                        control_abstraction='cmd_motor_speeds',
                        aero = False,
-                       assumed_quad_params = None 
+                       assumed_quad_params = None,
+                       integration_method = "RK45"
                 ):
         """
         Initialize quadrotor physical parameters.
@@ -68,6 +71,12 @@ class MultirotorModelMismatch(object):
             self.assumed_quad_params = quad_params
         else:
             self.assumed_quad_params = assumed_quad_params
+
+        # Integration method
+        if integration_method in {"RK45", "Euler"}:
+            self.integration_method = integration_method
+        else:
+            raise ValueError("Integration method must be 'RK45' or 'Euler'.")
     
         # Inertial parameters
         self.mass            = quad_params['mass'] # kg
@@ -207,12 +216,19 @@ class MultirotorModelMismatch(object):
         s = MultirotorModelMismatch._pack_state(state)
 
         # Option 1 - RK45 integration
-        # sol = scipy.integrate.solve_ivp(s_dot_fn, (0, t_step), s, first_step=t_step)
-        # s = sol['y'][:,-1]
+        if self.integration_method == "RK45":
+            sol = scipy.integrate.solve_ivp(s_dot_fn, (0, t_step), s, first_step=t_step)
+            s = sol['y'][:,-1]
         # Option 2 - Euler integration
-        s = s + s_dot_fn(0, s) * t_step  # first argument doesn't matter. It's time invariant model
+        elif self.integration_method == "Euler":
+            s = s + s_dot_fn(0, s) * t_step  # first argument doesn't matter. It's time invariant model
+        else:
+            raise ValueError("Unkown integrator in step(). Integration method must be 'RK45' or 'Euler'.")
 
         state = MultirotorModelMismatch._unpack_state(s)
+
+        if self.tau_m == 0:
+            state['rotor_speeds'] = cmd_rotor_speeds
 
         # Re-normalize unit quaternion.
         state['q'] = state['q'] / norm(state['q'])
@@ -237,7 +253,10 @@ class MultirotorModelMismatch(object):
         R = Rotation.from_quat(state['q']).as_matrix()
 
         # Rotor speed derivative
-        rotor_accel = (1/self.tau_m)*(cmd_rotor_speeds - rotor_speeds)
+        if self.tau_m == 0:
+            rotor_accel = np.zeros_like(rotor_speeds)
+        else:
+            rotor_accel = (1/self.tau_m)*(cmd_rotor_speeds - rotor_speeds)
 
         # Position derivative.
         x_dot = state['v']
@@ -330,7 +349,7 @@ class MultirotorModelMismatch(object):
 
         elif self.control_abstraction == 'cmd_motor_thrusts':
             # The controller commands individual motor forces. 
-            cmd_motor_speeds = control['cmd_motor_thrusts'] / self.assumed_k_etak_eta                        # Convert to motor speeds from thrust coefficient. 
+            cmd_motor_speeds = control['cmd_motor_thrusts'] / self.assumed_k_eta                        # Convert to motor speeds from thrust coefficient. 
             return np.sign(cmd_motor_speeds) * np.sqrt(np.abs(cmd_motor_speeds))
 
         elif self.control_abstraction == 'cmd_ctbm':

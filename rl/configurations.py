@@ -9,7 +9,8 @@ datt_model_mismatch_20 = {
     'time_horizon': 10,
     'include_env_params': False,
     'reference_randomize_threshold': 5000,                  # Env resets before refernce is randomized
-    'l1_simulation': True
+    'l1_simulation': True,
+    'integrator': "Euler"
 }
 
 # Experiment dictionary for the trajectory tracking task
@@ -19,7 +20,8 @@ datt_model_mismatch_40 = {
     'time_horizon': 10,
     'include_env_params': False,
     'reference_randomize_threshold': 5000,                  # Env resets before refernce is randomized
-    'l1_simulation': True
+    'l1_simulation': True,
+    'integrator': "Euler"
 }
 
 # Experiment dictionary for the trajectory tracking task
@@ -29,7 +31,8 @@ datt_model_mismatch_60 = {
     'time_horizon': 10,
     'include_env_params': False,
     'reference_randomize_threshold': 5000,                  # Env resets before refernce is randomized
-    'l1_simulation': True
+    'l1_simulation': True,
+    'integrator': "Euler"
 }
 
 # Experiment dictionary for the trajectory tracking task
@@ -39,7 +42,8 @@ datt_no_model_mismatch_20 = {
     'time_horizon': 10,
     'include_env_params': False,
     'reference_randomize_threshold': 5000,                  # Env resets before refernce is randomized
-    'l1_simulation': True
+    'l1_simulation': True,
+    'integrator': "Euler"
 }
 
 # Experiment dictionary for the trajectory tracking task
@@ -49,7 +53,8 @@ datt_no_model_mismatch_40 = {
     'time_horizon': 10,
     'include_env_params': False,
     'reference_randomize_threshold': 5000,                  # Env resets before refernce is randomized
-    'l1_simulation': True
+    'l1_simulation': True,
+    'integrator': "Euler"
 }
 
 # Experiment dictionary for the trajectory tracking task
@@ -59,7 +64,8 @@ datt_no_model_mismatch_60 = {
     'time_horizon': 10,
     'include_env_params': False,
     'reference_randomize_threshold': 5000,                  # Env resets before refernce is randomized
-    'l1_simulation': True
+    'l1_simulation': True,
+    'integrator': "Euler"
 }
 
 rma_model_mismatch_20 = {
@@ -68,7 +74,8 @@ rma_model_mismatch_20 = {
     'time_horizon': 10,
     'include_env_params': True,
     'reference_randomize_threshold': 5000,                  # Env resets before refernce is randomized
-    'l1_simulation': False
+    'l1_simulation': False,
+    'integrator': "Euler"
 }
 
 rma_model_mismatch_40 = {
@@ -77,7 +84,8 @@ rma_model_mismatch_40 = {
     'time_horizon': 10,
     'include_env_params': True,
     'reference_randomize_threshold': 5000,                  # Env resets before refernce is randomized
-    'l1_simulation': False
+    'l1_simulation': False,
+    'integrator': "Euler"
 }
 
 rma_model_mismatch_60 = {
@@ -86,7 +94,28 @@ rma_model_mismatch_60 = {
     'time_horizon': 10,
     'include_env_params': True,
     'reference_randomize_threshold': 5000,                  # Env resets before refernce is randomized
-    'l1_simulation': False
+    'l1_simulation': False,
+    'integrator': "Euler"
+}
+
+rma_no_model_mismatch_20 = {
+    'domain_randomization':0.2,
+    'model_mismatch': False,
+    'time_horizon': 10,
+    'include_env_params': True,
+    'reference_randomize_threshold': 5000,                  # Env resets before refernce is randomized
+    'l1_simulation': False,
+    'integrator': "Euler"
+}
+
+rma_no_model_mismatch_40 = {
+    'domain_randomization':0.4,
+    'model_mismatch': False,
+    'time_horizon': 10,
+    'include_env_params': True,
+    'reference_randomize_threshold': 5000,                  # Env resets before refernce is randomized
+    'l1_simulation': False,
+    'integrator': "Euler"
 }
 
 rma_no_model_mismatch_60 = {
@@ -95,7 +124,8 @@ rma_no_model_mismatch_60 = {
     'time_horizon': 10,
     'include_env_params': True,
     'reference_randomize_threshold': 5000,                  # Env resets before refernce is randomized
-    'l1_simulation': False
+    'l1_simulation': False,
+    'integrator': "Euler"
 }
 
 known_experiments = {
@@ -108,6 +138,8 @@ known_experiments = {
     'rma_model_mismatch_20': rma_model_mismatch_20,
     'rma_model_mismatch_40': rma_model_mismatch_40,
     'rma_model_mismatch_60': rma_model_mismatch_60,
+    'rma_no_model_mismatch_20': rma_no_model_mismatch_20,
+    'rma_no_model_mismatch_40': rma_no_model_mismatch_40,
     'rma_no_model_mismatch_60': rma_no_model_mismatch_60
 }
 

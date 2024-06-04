@@ -91,7 +91,8 @@ class QuadrotorTrackingEnv(gym.Env):
         self.aero = aero
 
         # Create quadrotor from quad params and control abstraction. 
-        self.quadrotor = MultirotorModelMismatch(quad_params=quad_params, initial_state=initial_state, control_abstraction=control_mode, aero=aero)
+        integrator = experiment_dict.get('integrator', 'Euler')
+        self.quadrotor = MultirotorModelMismatch(quad_params=quad_params, initial_state=initial_state, control_abstraction=control_mode, aero=aero, integration_method=integrator)
 
         assert render_mode is None or render_mode in self.metadata["render_modes"]
         self.render_mode = render_mode
@@ -300,9 +301,11 @@ class QuadrotorTrackingEnv(gym.Env):
         else:
             self.assumed_quad_params = quad_params_copy
         self.true_quad_params = quad_params_copy
+
+        integrator = self.experiment_dict.get('integrator', 'Euler')
         
         # Update the quadrotor model with the new parameters
-        self.quadrotor = MultirotorModelMismatch(quad_params=quad_params_copy, initial_state=state, control_abstraction=self.control_mode, aero=self.aero, assumed_quad_params=self.assumed_quad_params)
+        self.quadrotor = MultirotorModelMismatch(quad_params=quad_params_copy, initial_state=state, control_abstraction=self.control_mode, aero=self.aero, assumed_quad_params=self.assumed_quad_params, integration_method=integrator)
     
         # Set up scaling of the action space
         self.rotor_speed_max = self.assumed_quad_params['rotor_speed_max']
@@ -521,7 +524,7 @@ class QuadrotorTrackingEnv(gym.Env):
         
         if self.feedback_horizon > 0:
             self.feedback_buffer = np.roll(self.feedback_buffer, -1, axis=0)
-            self.feedback_buffer[-1] = current_state
+            self.feedback_buffer[-1] = self.current_state
             obs = np.hstack([obs, self.feedback_buffer.flatten()])
         
         if self.experiment_dict.get('include_env_params', False):

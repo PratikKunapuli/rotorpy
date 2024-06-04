@@ -83,7 +83,7 @@ def run_rollout(model, reference_class, experiment_dict, seed, adaptation_networ
 
         if adaptation_network is not None:
             base_obs, env_params = remove_env_info(obs, 10)
-            gt_latent = model.policy.encoder(torch.from_numpy(encoder_input).to(device)).detach().numpy()
+            gt_latent = model.policy.encoder(torch.from_numpy(env_params).to(device)).detach().numpy()
             adaptation_history = np.roll(adaptation_history, -1, axis=0)
             adaptation_history[-1] = np.concatenate([base_obs, action])
 
@@ -107,8 +107,8 @@ if __name__ == "__main__":
         adaptation_network = None
     else:
         action_dims = 4
-        if os.path.exists(SAVED_POLICY_DIR / f'{policy_name}_adapt' / f'{args.adapt_name}'):
-            adaptation_network_state_dict = torch.load(SAVED_POLICY_DIR / f'{policy_name}_adapt' / f'{args.adapt_name}', map_location=torch.device('cpu'))
+        if os.path.exists(SAVED_POLICY_DIR / f'{args.name}_adapt' / f'{args.adapt_name}'):
+            adaptation_network_state_dict = torch.load(SAVED_POLICY_DIR / f'{args.name}_adapt' / f'{args.adapt_name}', map_location=torch.device('cpu'))
         elif os.path.exists(SAVED_POLICY_DIR / f'{args.adapt_name}'):
             adaptation_network_state_dict = torch.load(SAVED_POLICY_DIR / f'{args.adapt_name}', map_location=torch.device('cpu'))
         else:

@@ -44,8 +44,8 @@ class TwoDLissajous(object):
     def gen_coefficients(self):
         self.A = np.random.uniform(-2, 2)
         self.B = np.random.uniform(-2, 2)
-        self.a = np.random.uniform(0.25, 2)
-        self.b = np.random.uniform(0.25, 2)
+        self.a = np.random.uniform(0.5, 2)
+        self.b = np.random.uniform(0.5, 2)
         self.delta = np.random.uniform(0, 2*np.pi)
 
     def reset(self):
@@ -56,9 +56,7 @@ class TwoDLissajous(object):
             np.random.seed(self.seed)
         elif self.env_diff_seed and self.reset_count > 0:
             np.random.seed(random.randint(0, 1000000))
-
-        self.coeff = self.generate_coeff()
-
+            
         self.reset_count += 1
         self.gen_coefficients()
 
