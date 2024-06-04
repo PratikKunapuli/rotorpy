@@ -251,9 +251,12 @@ class QuadrotorTrackingEnv(gym.Env):
                 self.ref.reset()
 
         if initial_state == 'random':
+            reference_pos = self.ref.update(t=0)['x']
+            reference_vel = self.ref.update(t=0)['x_dot']
+
             # Randomly select an initial state for the quadrotor. At least assume it is level. 
-            pos = np.random.uniform(low=-options['pos_bound'], high=options['pos_bound'], size=(3,))
-            vel = np.random.uniform(low=-options['vel_bound'], high=options['vel_bound'], size=(3,))
+            pos = np.random.uniform(low=-options['pos_bound'], high=options['pos_bound'], size=(3,)) + reference_pos
+            vel = np.random.uniform(low=-options['vel_bound'], high=options['vel_bound'], size=(3,)) + reference_vel
             state = {'x': pos,
                      'v': vel,
                      'q': np.array([0, 0, 0, 1]), # [i,j,k,w]
