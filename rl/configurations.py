@@ -2,6 +2,18 @@
 This file contains a collection of dictionaries corresponding to different experiments that can be queried by name
 """
 
+# DATT experiment with minsnap
+datt_minsnap = {
+    'domain_randomization': 0.01,
+    'model_mismatch': False,
+    'time_horizon': 10,
+    'include_env_params': False,
+    'reference_randomize_threshold': 50000,                  # Env resets before refernce is randomized
+    'l1_simulation': False,
+    # 'fb_body_frame': False
+    # 'l1_simulation': True
+}
+
 # Experiment dictionary for the trajectory tracking task
 datt_model_mismatch_20 = {
     'domain_randomization': 0.2,
@@ -140,7 +152,8 @@ known_experiments = {
     'rma_model_mismatch_60': rma_model_mismatch_60,
     'rma_no_model_mismatch_20': rma_no_model_mismatch_20,
     'rma_no_model_mismatch_40': rma_no_model_mismatch_40,
-    'rma_no_model_mismatch_60': rma_no_model_mismatch_60
+    'rma_no_model_mismatch_60': rma_no_model_mismatch_60,
+    'datt_minsnap': datt_minsnap
 }
 
 # Load experiment by name

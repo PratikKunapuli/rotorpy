@@ -14,6 +14,8 @@ from rotorpy.learning.quadrotor_trajectory_tracking import QuadrotorTrackingEnv
 # Reward functions can be specified by the user, or we can import from existing reward functions.
 from rotorpy.learning.quadrotor_reward_functions import hover_reward, datt_reward
 from rotorpy.trajectories.lissajous_traj import TwoDLissajous
+from rotorpy.trajectories.minsnap_datt import MinSnap
+from rotorpy.utils.helper_functions import sample_waypoints
 
 from custom_policies import *
 from configurations import load_experiment
@@ -43,9 +45,10 @@ def parse_args():
         default=None,
         help='Name of the adaptation network to eval.')
     parser.add_argument('--num-envs', dest='num_envs',
-        type=int, default=10,
+        type=int, default=1,
         help='Number of environments to run in parallel.'
     )
+    parser.add_argument('-r', '--ref', dest='ref', type=str, default="lissajous_ref")
     return parser.parse_args()
 
 def remove_env_info(obs, env_dimension):
@@ -61,7 +64,9 @@ def run_rollout(model, reference_class, experiment_dict, seed, adaptation_networ
     """
     Run a rollout with the given model and reference trajectory. 
     """
-    traj = reference_class(seed = seed)
+    # traj = reference_class(seed = seed)
+    waypoints = sample_waypoints(seed=seed)
+    traj = reference_class(points=waypoints, yaw_angles=np.zeros(4), v_avg=2, seed=seed, fixed_seed=True)
     env = QuadrotorTrackingEnv(quad_params, experiment_dict=experiment_dict, render_mode='None', reference = traj, reward_fn = datt_reward)
     obs, _  = env.reset(seed=seed)
     if adaptation_network is not None:
@@ -72,6 +77,7 @@ def run_rollout(model, reference_class, experiment_dict, seed, adaptation_networ
 
     done = False
     total_reward = 0
+    crash_rate = 0
     while not done:
         if adaptation_network is not None:
             latent = adaptation_network(adaptation_history)
@@ -93,8 +99,22 @@ def run_rollout(model, reference_class, experiment_dict, seed, adaptation_networ
         total_reward += reward
     rollout_states = np.asarray(rollout_states)
     rollout_ref_states = np.asarray(rollout_ref_states)
-    control_error = np.mean(np.linalg.norm(rollout_states[:, 3:6] - rollout_ref_states[:, :], axis=1))
-    return control_error, total_reward
+    print(rollout_states.shape)
+    print(rollout_ref_states.shape)
+    T = rollout_states.shape[0]
+    print("Total time", T)
+    # waypoints = sample_waypoints(seed=seed)
+    # print("Waypoint shape", waypoints.shape)
+    ax = plt.figure().add_subplot(projection='3d')
+    ax.plot(rollout_states[:, 0], rollout_states[:, 1], rollout_states[:, 2], label="state")
+    ax.plot(rollout_ref_states[:, 0], rollout_ref_states[:, 1], rollout_ref_states[:, 2], label="ref")
+    ax.scatter(waypoints[:, 0], waypoints[:, 1], waypoints[:, 2], label='waypoints')
+    ax.legend()
+    plt.savefig("../media/3Dplot.png")
+    control_error = np.mean(np.linalg.norm(rollout_states[:, 0:3] - rollout_ref_states[:, :], axis=1))
+    if control_error > 1.5:
+        crash_rate += 1
+    return control_error, total_reward, crash_rate
 
 if __name__ == "__main__":
     args = parse_args()
@@ -120,11 +140,13 @@ if __name__ == "__main__":
 
     experiment_dict = load_experiment(args.config)
 
-    returns = Parallel(n_jobs=args.num_envs)(delayed(run_rollout)(model, TwoDLissajous, experiment_dict, seed, adaptation_network) for seed in range(args.num_envs))
-    
+    # returns = Parallel(n_jobs=args.num_envs)(delayed(run_rollout)(model, TwoDLissajous, experiment_dict, seed, adaptation_network) for seed in range(args.num_envs))
+    returns = Parallel(n_jobs=args.num_envs)(delayed(run_rollout)(model, MinSnap, experiment_dict, seed, adaptation_network) for seed in range(args.num_envs))
     returns = np.asarray(returns)
     print("Mean control error: ", np.mean(returns[:, 0]))
     print("Std Dev control error: ", np.std(returns[:, 0]))
 
     print("\nMean total reward: ", np.mean(returns[:, 1]))
     print("Std Dev total reward: ", np.std(returns[:, 1]))
+
+    print("Crash rate", returns[:, 2])

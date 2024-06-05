@@ -13,6 +13,8 @@ from rotorpy.learning.quadrotor_trajectory_tracking import QuadrotorTrackingEnv
 # Reward functions can be specified by the user, or we can import from existing reward functions.
 from rotorpy.learning.quadrotor_reward_functions import hover_reward, datt_reward
 from rotorpy.trajectories.lissajous_traj import TwoDLissajous
+from rotorpy.trajectories.minsnap_datt import MinSnap
+from rotorpy.utils.helper_functions import sample_waypoints
 
 from argparse import ArgumentParser
 from custom_policies import *
@@ -53,8 +55,8 @@ def parse_args():
         help='The directory to log training info to. Can run tensorboard from this directory to view.'   
     )
     parser.add_argument('-ts', '--timesteps', dest='timesteps',
-        type=int, default=1e6,
-        help='Number of timesteps to train for. Default: 1 million'    
+        type=int, default=10e6,
+        help='Number of timesteps to train for. Default: 10 million'    
     )
     parser.add_argument('-ch', '--checkpoint', dest='checkpoint',
         type=bool, default=False,
@@ -97,6 +99,8 @@ def train():
     # TODO add more configurability here
     if args.ref == "lissajous_ref":
         traj = TwoDLissajous(A=1, B=1, a=1, b=2, delta=0, height=0.5, yaw_bool=False, dt=1/args.rate, seed = 2024, fixed_seed = False, env_diff_seed=True)
+    elif args.ref == "minsnap_ref":
+        traj = MinSnap(points=sample_waypoints(seed=5), yaw_angles=np.zeros(4), v_avg=2, dt=1/args.rate, seed = 2024, fixed_seed = True, env_diff_seed=True)
     else:
         raise NotImplementedError
 
@@ -193,7 +197,7 @@ def train():
 
     if args.checkpoint:
         checkpoint_callback = CheckpointCallback(
-            save_freq=50000,
+            save_freq=5000,
             # save_freq = 100,
             save_path=SAVED_POLICY_DIR,
             name_prefix=args.name
