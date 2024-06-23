@@ -128,6 +128,29 @@ rma_no_model_mismatch_60 = {
     'integrator': "Euler"
 }
 
+rma_traj_tracking = {
+    'domain_randomization': 0.05,
+    'model_mismatch': False,
+    'time_horizon': 10,
+    'include_env_params': True,
+    'reference_randomize_threshold': 100000,                  # Env resets before refernce is randomized
+    'l1_simulation': False,
+    'integrator': "Euler",
+    'reward': 'sejong'
+}
+
+rma_traj_tracking_no_fb = {
+    'domain_randomization': 0.05,
+    'model_mismatch': False,
+    'time_horizon': 10,
+    'include_env_params': True,
+    'reference_randomize_threshold': 100000,                  # Env resets before refernce is randomized
+    'l1_simulation': False,
+    'integrator': "Euler",
+    'fb_body_frame': False,
+    'reward': 'sejong'
+}
+
 known_experiments = {
     'datt_model_mismatch_20': datt_model_mismatch_20,
     'datt_model_mismatch_40': datt_model_mismatch_40,
@@ -140,7 +163,9 @@ known_experiments = {
     'rma_model_mismatch_60': rma_model_mismatch_60,
     'rma_no_model_mismatch_20': rma_no_model_mismatch_20,
     'rma_no_model_mismatch_40': rma_no_model_mismatch_40,
-    'rma_no_model_mismatch_60': rma_no_model_mismatch_60
+    'rma_no_model_mismatch_60': rma_no_model_mismatch_60,
+    'rma_traj_tracking': rma_traj_tracking,
+    'rma_traj_tracking_no_fb': rma_traj_tracking_no_fb
 }
 
 # Load experiment by name

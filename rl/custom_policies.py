@@ -11,18 +11,69 @@ from stable_baselines3.common.torch_layers import create_mlp
 from gymnasium.spaces import Box
 
 class RMAFeaturesExtractor(BaseFeaturesExtractor):
-    def __init__(self, observation_space, encoder, encoder_input_dim):
+    def __init__(self, observation_space, encoder, encoder_input_dim, dims=3, complex=True, extra_state_features=0):
         # Example: concatenating encoded features with original observation
         # Adjust the feature_dim accordingly
-        super(RMAFeaturesExtractor, self).__init__(observation_space, features_dim=encoder.output_dim + observation_space.shape[0])
+        n_features = ((observation_space.shape[0] - encoder_input_dim - 13) // dims - 6) * 8
+        super(RMAFeaturesExtractor, self).__init__(observation_space, features_dim=encoder.output_dim + n_features + 13)
+        
         self.encoder = encoder
         self.encoder_input_dim = encoder_input_dim
+        self.n_state_features = 13 + extra_state_features
+        self.n_ff_features = observation_space.shape[0] - encoder_input_dim - self.n_state_features
+        self.dims = dims
+        self.complex = complex
+
+        assert self.n_ff_features % self.dims == 0
+
+        ff_feature_dim = (self.n_ff_features // self.dims - 4) * 8
+        if complex:
+            ff_feature_dim = (self.n_ff_features // self.dims - 6) * 8
+
+        features_dim = self.n_state_features + ff_feature_dim
+
+        super().__init__(observation_space, features_dim)
+
+        if self.complex:
+            self.layer1 = torch.nn.Conv1d(in_channels=self.dims, out_channels=32, kernel_size=3, stride=1)
+            self.act1 = torch.nn.ReLU()
+            self.layer2 = torch.nn.Conv1d(in_channels=32, out_channels=32, kernel_size=3)
+            self.layer3 = torch.nn.Conv1d(in_channels=32, out_channels=8, kernel_size=3)
+        else:
+            self.layer1 = torch.nn.Conv1d(in_channels=self.dims, out_channels=8, kernel_size=3, stride=1)
+            self.act1 = torch.nn.ReLU()
+            self.layer2 = torch.nn.Conv1d(in_channels=8, out_channels=8, kernel_size=3)
 
     def forward(self, observations):
         # last encoder_input_dim elements are the encoder input
-        obs, encoder_input = observations[:, :-self.encoder_input_dim], observations[:, -self.encoder_input_dim:]
-        encoding = self.encoder(encoder_input)
-        return torch.cat((obs, encoding), dim=1)
+        full_obs = observations
+        # encoding = self.encoder(encoder_input)
+
+        batch_dim = full_obs.shape[0]
+        obs_dim = full_obs.shape[1]
+
+        ff_features = full_obs[:, self.n_state_features:].reshape(batch_dim, (obs_dim - self.n_state_features)  // self.dims, self.dims)
+        # channel first
+        ff_features = torch.permute(ff_features, (0, 2, 1))
+
+        obs_features = full_obs[:, :self.n_state_features]
+
+        if self.complex:
+            x = self.act1(self.layer1(ff_features))
+            x = self.act1(self.layer2(x))
+            x = self.layer3(x)
+        else:
+            x = self.act1(self.layer1(ff_features))
+            x = self.layer2(x)
+        
+        x = torch.flatten(x, start_dim=1)
+
+        output = torch.cat([obs_features, x], axis=1)
+
+
+        return output
+
+        # return torch.cat((output, encoding), dim=1)
     
 
 class RMAEncoder(nn.Module):
@@ -51,9 +102,10 @@ class RMAEncoder(nn.Module):
 class RMAPolicy(ActorCriticPolicy):
     def __init__(self, observation_space, action_space, lr_schedule, encoder_input_dim, encoder_network_architecture, encoder_output_dim,
                  net_arch=None, activation_fn=nn.Tanh, *args, **kwargs):
-        modified_observation_space = Box(low=np.concatenate([observation_space.low[:-encoder_input_dim], np.full(encoder_output_dim, -np.inf)]), high=np.concatenate([observation_space.high[:-encoder_input_dim], np.full(encoder_output_dim, np.inf)]))
-        print(observation_space)
-        print(modified_observation_space)
+        n_features = ((observation_space.shape[0] - encoder_input_dim - 13) // 3 - 6) * 8 + 13
+
+        modified_observation_space = Box(low=np.full(encoder_output_dim+n_features, -np.inf), high=np.full(encoder_output_dim+n_features, np.inf))
+
         super(RMAPolicy, self).__init__(modified_observation_space, action_space, lr_schedule, 
                                         net_arch=net_arch, 
                                            activation_fn=activation_fn, *args, **kwargs)
@@ -118,6 +170,12 @@ class RMAPolicy(ActorCriticPolicy):
         action = distribution.mode()
         action = action.cpu().detach().numpy().squeeze()
         return action
+    
+    def extract_features(self, obs):
+        obs, encoder_input = obs[:, :-self.encoder.input_dim], obs[:, -self.encoder.input_dim:]
+        encoding = self.encoder(encoder_input)
+        features = self.features_extractor(obs)
+        return torch.cat((features, encoding), dim=1)
 
 class RPGFeaturesExtractor(BaseFeaturesExtractor):
     def __init__(self, observation_space, features_dim):
@@ -211,7 +269,7 @@ class RPGPolicy(ActorCriticPolicy):
         return action, state
     
 class FeedforwardFeaturesExtractor(BaseFeaturesExtractor):
-    def __init__(self, observation_space: Box, extra_state_features=0, dims=3, complex=False):
+    def __init__(self, observation_space: Box, extra_state_features=0, dims=3, complex=True):
         self.n_state_features = 10 + extra_state_features
         self.n_ff_features = observation_space.shape[0] - self.n_state_features
         self.dims = dims

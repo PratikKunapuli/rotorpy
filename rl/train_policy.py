@@ -11,8 +11,9 @@ from rotorpy.learning.quadrotor_environments import QuadrotorEnv
 from rotorpy.learning.quadrotor_trajectory_tracking import QuadrotorTrackingEnv
 
 # Reward functions can be specified by the user, or we can import from existing reward functions.
-from rotorpy.learning.quadrotor_reward_functions import hover_reward, datt_reward
+from rotorpy.learning.quadrotor_reward_functions import hover_reward, datt_reward, DRL_sejong_reward
 from rotorpy.trajectories.lissajous_traj import TwoDLissajous
+from rotorpy.trajectories.hover_traj import HoverTraj
 
 from argparse import ArgumentParser
 from custom_policies import *
@@ -43,7 +44,7 @@ def parse_args():
     )
     parser.add_argument('--reward', dest='reward',
         default="datt", 
-        help='Reward function to use. Default: datt')
+        help='Reward function to use. Options: {datt, sejong, hover}. Default: datt')
     parser.add_argument('-n', '--name', dest='name', 
         default=None,
         help='Name of the policy to train. If such policy already exists in ./saved_policies/, continues training it.'
@@ -69,6 +70,10 @@ def parse_args():
         help='Rate at which to run the environment in Hz. Default: 100 Hz'
     )
 
+    parser.add_argument('--action', dest='action',
+        type=str, default='cmd_ctbr',
+        help='Action space to use. Options: {cmd_ctbr, cmd_ctatt}. Default: cmd_ctbr')
+
     parser.add_argument('--n-envs', type=int, help='How many "parallel" environments to run', default=10)
     parser.add_argument('-r', '--ref', dest='ref', type=str, default="lissajous_ref")
     parser.add_argument('--seed', dest='seed', type=int, default=None,
@@ -92,11 +97,22 @@ def train():
         raise FileNotFoundError(f'{log_dir} does not exist')
     
     # Set up Env
-    reward_function = datt_reward if args.reward == 'datt' else hover_reward
+
+    #define reward
+    if args.reward == 'datt':
+        reward_function = datt_reward
+    elif args.reward == 'hover':
+        reward_function = hover_reward
+    elif args.reward == 'sejong':
+        reward_function = DRL_sejong_reward
+    else:
+        raise NotImplementedError
     experiment_dict = load_experiment(args.config)
     # TODO add more configurability here
     if args.ref == "lissajous_ref":
-        traj = TwoDLissajous(A=1, B=1, a=1, b=2, delta=0, height=0.5, yaw_bool=False, dt=1/args.rate, seed = 2024, fixed_seed = False, env_diff_seed=True)
+        traj = TwoDLissajous(A=1, B=1, a=1, b=2, delta=np.pi/2, height=0.5, yaw_bool=False, dt=1/args.rate, seed = 2024, fixed_seed = False, env_diff_seed=True)
+    elif args.ref == "hover_ref":
+        traj = HoverTraj()
     else:
         raise NotImplementedError
 
@@ -127,7 +143,7 @@ def train():
             encoder_input_dim = 10
 
             policy_net_arch = dict(pi=[64, 64, 64], vf=[64, 64, 64])
-            policy_kwargs = dict(activation_fn=torch.nn.ReLU,
+            policy_kwargs = dict(activation_fn=torch.nn.Tanh,
                         net_arch=policy_net_arch,
                         encoder_input_dim = encoder_input_dim,
                         encoder_output_dim = encoder_output_dim, 
@@ -144,6 +160,13 @@ def train():
             )
             policy_class = RPGPolicy
             print("Using policy: RPG")
+        elif args.model.upper() == "SIMPLE":
+            policy_class = 'MlpPolicy'
+            policy_kwargs = dict(activation_fn=torch.nn.Tanh,
+                        net_arch=dict(pi=[64, 64, 64], vf=[64, 64, 64]),
+                        share_features_extractor = True
+            )
+            print("Using policy: SIMPLE")
         else:
             raise NotImplementedError
 
@@ -155,6 +178,7 @@ def train():
             'reference': traj,
             'reward_fn': reward_function,
             'sim_rate': args.rate,
+            'control_mode': args.action
         }
 
         if issubclass(env_class, VecEnv):
@@ -174,7 +198,7 @@ def train():
         )
     else:
         env_class = QuadrotorTrackingEnv
-        experiment_dict['reference_randomize_threshold'] = 0 # begin randomizing the reference trajectory immediately
+        # experiment_dict['reference_randomize_threshold'] = 0 # begin randomizing the reference trajectory immediately
         env_kwargs = {
             'quad_params': quad_params,
             'experiment_dict': experiment_dict,
@@ -182,6 +206,7 @@ def train():
             'reference': traj,
             'reward_fn': reward_function,
             'sim_rate': args.rate,
+            'control_mode': args.action
         }
 
         if issubclass(env_class, VecEnv):
@@ -200,6 +225,8 @@ def train():
         )
     else:
         checkpoint_callback = None
+
+    print(policy.policy)
 
     policy.learn(total_timesteps=args.timesteps, progress_bar=True, callback=checkpoint_callback)
     policy.save(SAVED_POLICY_DIR / args.name)
