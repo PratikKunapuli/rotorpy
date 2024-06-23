@@ -5,6 +5,8 @@ import os
 from datetime import datetime
 import torch
 
+from scipy.spatial.transform import Rotation
+
 from rotorpy.vehicles.crazyflie_params import quad_params  # Import quad params for the quadrotor environment.
 
 # Import the QuadrotorEnv gymnasium environment using the following command.
@@ -14,6 +16,7 @@ from rotorpy.learning.quadrotor_trajectory_tracking import QuadrotorTrackingEnv
 # Reward functions can be specified by the user, or we can import from existing reward functions.
 from rotorpy.learning.quadrotor_reward_functions import hover_reward, datt_reward
 from rotorpy.trajectories.lissajous_traj import TwoDLissajous
+from rotorpy.trajectories.hover_traj import HoverTraj
 
 from custom_policies import *
 from configurations import load_experiment
@@ -46,6 +49,11 @@ def parse_args():
         type=int, default=10,
         help='Number of environments to run in parallel.'
     )
+    parser.add_argument('--ref', dest='ref', 
+        type=str, default='lissajous_ref')
+
+    parser.add_argument('--action', type=str, default='cmd_ctbr', required=True)
+
     return parser.parse_args()
 
 def remove_env_info(obs, env_dimension):
@@ -57,18 +65,29 @@ def add_env_info(obs, env_params):
     obs = np.concatenate([obs, env_params])
     return obs
 
-def run_rollout(model, reference_class, experiment_dict, seed, adaptation_network=None):
+def run_rollout(model, args, experiment_dict, action_mode, seed, adaptation_network=None):
     """
     Run a rollout with the given model and reference trajectory. 
     """
-    traj = reference_class(seed = seed)
-    env = QuadrotorTrackingEnv(quad_params, experiment_dict=experiment_dict, render_mode='None', reference = traj, reward_fn = datt_reward)
-    obs, _  = env.reset(seed=seed)
+    if args.ref == "lissajous_ref":
+        traj = TwoDLissajous(A=1, B=1, a=1, b=2, delta=np.pi/2, height=0.5, yaw_bool=False, dt=0.01, seed = 2024, fixed_seed = False, env_diff_seed=True)
+    elif args.ref == "hover_ref":
+        traj = HoverTraj()
+    else:
+        raise NotImplementedError
+
+    experiment_dict['integrator'] = 'RK45' # make the integrator more accurate
+
+    env = QuadrotorTrackingEnv(quad_params, experiment_dict=experiment_dict, render_mode='None', control_mode=action_mode, reference = traj, reward_fn = datt_reward)
+    obs, _  = env.reset(seed=seed, options={'pos_bound': 0.2,'vel_bound':0})
     if adaptation_network is not None:
         adaptation_history = np.zeros((100, 13+4))
         
     rollout_states = []
     rollout_ref_states = []
+
+    rollout_positions = []
+    rollout_rotations = []
 
     done = False
     total_reward = 0
@@ -89,12 +108,17 @@ def run_rollout(model, reference_class, experiment_dict, seed, adaptation_networ
 
         rollout_states.append(env._get_current_state())
         rollout_ref_states.append(env._get_current_reference()['x'])
+        rollout_positions.append(env._get_current_state()[:3])
+        rollout_rotations.append(Rotation.from_quat(env._get_current_state()[6:10]).as_matrix())
         
         total_reward += reward
     rollout_states = np.asarray(rollout_states)
     rollout_ref_states = np.asarray(rollout_ref_states)
-    control_error = np.mean(np.linalg.norm(rollout_states[:, 3:6] - rollout_ref_states[:, :], axis=1))
-    return control_error, total_reward
+    control_error = np.mean(np.linalg.norm(rollout_states[:, :3] - rollout_ref_states[:, :], axis=1))
+    rollout_positions = np.asarray(rollout_positions)
+    rollout_rotations = np.asarray(rollout_rotations)
+
+    return control_error, total_reward, rollout_states, rollout_ref_states, rollout_positions, rollout_rotations
 
 if __name__ == "__main__":
     args = parse_args()
@@ -120,11 +144,51 @@ if __name__ == "__main__":
 
     experiment_dict = load_experiment(args.config)
 
-    returns = Parallel(n_jobs=args.num_envs)(delayed(run_rollout)(model, TwoDLissajous, experiment_dict, seed, adaptation_network) for seed in range(args.num_envs))
-    
-    returns = np.asarray(returns)
+    returns = Parallel(n_jobs=args.num_envs)(delayed(run_rollout)(model, args, experiment_dict, args.action, seed, adaptation_network) for seed in range(args.num_envs))
+    # print(returns)
+    #0th index is the control error, 1st index is the total reward, 2nd index is the rollout states, 3rd index is the rollout reference states, 4th index is the rollout positions, 5th index is the rollout rotations
+    returns = np.asarray(returns, dtype=object)
     print("Mean control error: ", np.mean(returns[:, 0]))
     print("Std Dev control error: ", np.std(returns[:, 0]))
 
     print("\nMean total reward: ", np.mean(returns[:, 1]))
     print("Std Dev total reward: ", np.std(returns[:, 1]))
+
+    # create animation
+    all_positions = np.zeros((10*100 + 1, args.num_envs, 3))
+    all_rotations = np.zeros((10*100 + 1, args.num_envs, 3, 3))
+    reference_positions = np.zeros((10*100, 3))
+
+    if args.ref == "lissajous_ref":
+        ref = TwoDLissajous(A=1, B=1, a=1, b=2, delta=np.pi/2, height=0.5, yaw_bool=False, dt=0.01, seed = 2024, fixed_seed = False, env_diff_seed=True)
+    elif args.ref == "hover_ref":
+        ref = HoverTraj()
+    else:
+        raise NotImplementedError
+
+    T = 10*100
+    M = returns.shape[0]
+    time_vec = np.arange(0, 10.01, 0.01)
+
+    for i in np.arange(0, 10, 0.01):
+        reference_positions[int(i*100)] = ref.update(i)['x']
+
+    for env_number in range(returns.shape[0]):
+        positions = returns[env_number, 4]
+        rotations = returns[env_number, 5]
+        time = positions.shape[0]
+        all_positions[:time, env_number, :] = positions
+        all_rotations[:time, env_number, :, :] = rotations
+
+        # fill rest of the time with the last position and rotation
+        all_positions[time:, env_number, :] = positions[-1]
+        all_rotations[time:, env_number, :, :] = rotations[-1]
+
+    from rotorpy.utils.animate import animate
+
+    outputfile_name = "Eval_" + args.name + ".mp4"
+
+    from rotorpy.world import World
+    world = World.empty((-4, 4, -4, 
+                                       4, -4, 4))
+    animation = animate(time_vec, all_positions, all_rotations, wind=np.zeros((T,M,3)), animate_wind=False, world=world, filename=outputfile_name, blit=False, show_axes=True, close_on_finish=True, reference=reference_positions)
