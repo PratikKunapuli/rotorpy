@@ -1,0 +1,357 @@
+import torch
+import torch.nn as nn
+import numpy as np
+
+from stable_baselines3.common.policies import ActorCriticPolicy
+from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
+from stable_baselines3.common.distributions import make_proba_distribution
+from stable_baselines3.common.utils import get_device
+from stable_baselines3.common.torch_layers import create_mlp
+
+from gymnasium.spaces import Box
+
+class RMAFeaturesExtractor(BaseFeaturesExtractor):
+    def __init__(self, observation_space, encoder, encoder_input_dim, dims=3, complex=True, extra_state_features=0):
+        # Example: concatenating encoded features with original observation
+        # Adjust the feature_dim accordingly
+        n_features = ((observation_space.shape[0] - encoder_input_dim - 13) // dims - 6) * 8
+        super(RMAFeaturesExtractor, self).__init__(observation_space, features_dim=encoder.output_dim + n_features + 13)
+        
+        self.encoder = encoder
+        self.encoder_input_dim = encoder_input_dim
+        self.n_state_features = 13 + extra_state_features
+        self.n_ff_features = observation_space.shape[0] - encoder_input_dim - self.n_state_features
+        self.dims = dims
+        self.complex = complex
+
+        assert self.n_ff_features % self.dims == 0
+
+        ff_feature_dim = (self.n_ff_features // self.dims - 4) * 8
+        if complex:
+            ff_feature_dim = (self.n_ff_features // self.dims - 6) * 8
+
+        features_dim = self.n_state_features + ff_feature_dim
+
+        super().__init__(observation_space, features_dim)
+
+        if self.complex:
+            self.layer1 = torch.nn.Conv1d(in_channels=self.dims, out_channels=32, kernel_size=3, stride=1)
+            self.act1 = torch.nn.ReLU()
+            self.layer2 = torch.nn.Conv1d(in_channels=32, out_channels=32, kernel_size=3)
+            self.layer3 = torch.nn.Conv1d(in_channels=32, out_channels=8, kernel_size=3)
+        else:
+            self.layer1 = torch.nn.Conv1d(in_channels=self.dims, out_channels=8, kernel_size=3, stride=1)
+            self.act1 = torch.nn.ReLU()
+            self.layer2 = torch.nn.Conv1d(in_channels=8, out_channels=8, kernel_size=3)
+
+    def forward(self, observations):
+        # last encoder_input_dim elements are the encoder input
+        full_obs = observations
+        # encoding = self.encoder(encoder_input)
+
+        batch_dim = full_obs.shape[0]
+        obs_dim = full_obs.shape[1]
+
+        ff_features = full_obs[:, self.n_state_features:].reshape(batch_dim, (obs_dim - self.n_state_features)  // self.dims, self.dims)
+        # channel first
+        ff_features = torch.permute(ff_features, (0, 2, 1))
+
+        obs_features = full_obs[:, :self.n_state_features]
+
+        if self.complex:
+            x = self.act1(self.layer1(ff_features))
+            x = self.act1(self.layer2(x))
+            x = self.layer3(x)
+        else:
+            x = self.act1(self.layer1(ff_features))
+            x = self.layer2(x)
+        
+        x = torch.flatten(x, start_dim=1)
+
+        output = torch.cat([obs_features, x], axis=1)
+
+
+        return output
+
+        # return torch.cat((output, encoding), dim=1)
+    
+
+class RMAEncoder(nn.Module):
+    def __init__(self, input_dim, network_architecture, output_dim, activation_fn):
+        super(RMAEncoder, self).__init__()
+        self.input_dim = input_dim
+        self.network_architecture = network_architecture
+        self.output_dim = output_dim
+        self.activation_fn = activation_fn
+
+        self.encoder_layers = []
+
+        for i in range(len(network_architecture) - 1):
+            if i == 0:
+                self.encoder_layers.append(nn.Linear(input_dim, network_architecture[i]))
+            else:
+                self.encoder_layers.append(nn.Linear(network_architecture[i-1], network_architecture[i]))
+            self.encoder_layers.append(activation_fn())
+        self.encoder_layers.append(nn.Linear(network_architecture[-1], output_dim))
+
+        self.encoder = nn.Sequential(*self.encoder_layers)
+    
+    def forward(self, x):
+        return self.encoder(x)
+    
+class RMAPolicy(ActorCriticPolicy):
+    def __init__(self, observation_space, action_space, lr_schedule, encoder_input_dim, encoder_network_architecture, encoder_output_dim,
+                 net_arch=None, activation_fn=nn.Tanh, *args, **kwargs):
+        n_features = ((observation_space.shape[0] - encoder_input_dim - 13) // 3 - 6) * 8 + 13
+
+        modified_observation_space = Box(low=np.full(encoder_output_dim+n_features, -np.inf), high=np.full(encoder_output_dim+n_features, np.inf))
+
+        super(RMAPolicy, self).__init__(modified_observation_space, action_space, lr_schedule, 
+                                        net_arch=net_arch, 
+                                           activation_fn=activation_fn, *args, **kwargs)
+        self.encoder = RMAEncoder(encoder_input_dim, encoder_network_architecture, encoder_output_dim, activation_fn)
+        self.features_extractor = RMAFeaturesExtractor(observation_space, self.encoder, encoder_input_dim)
+
+        
+        
+        self.encoder.to(self.device)
+        # Re-initialize the actor and critic with the correct input dimensions
+        self.action_dist = make_proba_distribution(action_space)
+        self.value_net = nn.Linear(self.mlp_extractor.latent_dim_vf, 1).to(self.device)
+        
+    def forward(self, obs, deterministic=False):
+        features = self.extract_features(obs)
+        latent_pi, latent_vf = self.mlp_extractor(features)
+        distribution = self._get_action_dist_from_latent(latent_pi)
+        values = self.value_net(latent_vf)
+
+        if deterministic:
+            actions = distribution.mode()
+        else:
+            actions = distribution.sample()
+
+        log_prob = distribution.log_prob(actions)
+        return actions, values, log_prob
+    
+    def predict_values(self, obs):
+        features = self.extract_features(obs)
+        _, latent_vf = self.mlp_extractor(features)
+        return self.value_net(latent_vf)
+
+    def _get_constructor_parameters(self):
+        data = super(RMAPolicy, self)._get_constructor_parameters()
+        data.update(dict(
+            encoder_input_dim=self.encoder.input_dim,
+            encoder_network_architecture=self.encoder.network_architecture,
+            encoder_output_dim=self.encoder.output_dim
+        ))
+        return data
+
+    def predict(self, observation, state=None, mask=None, deterministic=False, features_included = False):
+        observation = torch.as_tensor(observation).float().to(self.device)
+        if not features_included:
+            features = self.extract_features(observation.unsqueeze(0))
+        else:
+            features = observation.unsqueeze(0)
+        latent_pi, _ = self.mlp_extractor(features)
+        distribution = self._get_action_dist_from_latent(latent_pi)
+        if deterministic:
+            action = distribution.mode()
+        else:
+            action = distribution.sample()
+        action = action.cpu().detach().numpy().squeeze()
+        return action, state
+    
+    def rollout_prediction(self, observation):
+        observation = torch.as_tensor(observation).float().to(self.device)
+        features = observation.unsqueeze(0)
+        latent_pi, _ = self.mlp_extractor(features)
+        distribution = self._get_action_dist_from_latent(latent_pi)
+        action = distribution.mode()
+        action = action.cpu().detach().numpy().squeeze()
+        return action
+    
+    def extract_features(self, obs):
+        obs, encoder_input = obs[:, :-self.encoder.input_dim], obs[:, -self.encoder.input_dim:]
+        encoding = self.encoder(encoder_input)
+        features = self.features_extractor(obs)
+        return torch.cat((features, encoding), dim=1)
+
+class RPGFeaturesExtractor(BaseFeaturesExtractor):
+    def __init__(self, observation_space, features_dim):
+        # Example: concatenating encoded features with original observation
+        # Adjust the feature_dim accordingly
+        super(RPGFeaturesExtractor, self).__init__(observation_space, features_dim)
+        print("Observation Space: ", observation_space.shape)
+        
+
+    def forward(self, observations):
+        # last 10 elements are the privaleged info
+        obs_without_params = observations[:, :-10]
+        assumed_params = observations[:, -10:]
+        # Concatenate the assumed parameters to the extracted features
+        return torch.cat((obs_without_params, assumed_params), dim=1)
+
+class RPGPolicy(ActorCriticPolicy):
+    def __init__(self, *args, **kwargs):
+        super(RPGPolicy, self).__init__(
+            *args,
+            **kwargs
+        )
+        self.policy_net, self.value_net = self._build_custom_networks(kwargs['net_arch'])
+        self.features_extractor = RPGFeaturesExtractor(self.observation_space, 128)
+
+    def _build_custom_networks(self, net_arch):
+        # Extract the feature dimensions
+        policy_feature_dim = self.observation_space.shape[0] - 10
+        value_feature_dim = self.observation_space.shape[0]
+
+        # Extract the architecture from net_arch
+        pi_arch = net_arch[0]['pi']
+        vf_arch = net_arch[0]['vf']
+
+        # Create separate networks for policy and value functions
+        policy_net = nn.Sequential(
+            *create_mlp(policy_feature_dim, 128, net_arch=pi_arch),
+        )
+
+        value_net = nn.Sequential(
+            *create_mlp(value_feature_dim, 1, net_arch=vf_arch),
+        )
+
+        return policy_net, value_net
+
+    def forward(self, obs, deterministic=False):
+        features = self.extract_features(obs)
+        policy_features = features[:, :-10]
+        value_features = features
+
+        policy_latent = self.policy_net(policy_features)
+
+        distribution = self._get_action_dist_from_latent(policy_latent)
+        actions = distribution.get_actions(deterministic=deterministic)
+        log_prob = distribution.log_prob(actions)
+
+        value = self.value_net(value_features)
+        return actions, value, log_prob
+
+    def _get_latent(self, obs):
+        features = self.extract_features(obs)
+        policy_features = features[:, :-10]
+        value_features = features
+        policy_latent = self.policy_net(policy_features)
+        return policy_latent, value_features
+
+    def evaluate_actions(self, obs, actions):
+        policy_latent, value_features = self._get_latent(obs)
+        distribution = self._get_action_dist_from_latent(policy_latent)
+        log_prob = distribution.log_prob(actions)
+        entropy = distribution.entropy()
+
+        value = self.value_net(value_features)
+        return value, log_prob, entropy
+
+    def predict_values(self, obs):
+        value_features = self.extract_features(obs)
+        return self.value_net(value_features)
+    
+    def predict(self, observation, state=None, mask=None, deterministic=False):
+        observation = torch.as_tensor(observation).float().to(self.device)
+        features = self.extract_features(observation.unsqueeze(0))
+        policy_features = features[:, :-10]
+        latent_pi = self.policy_net(policy_features)
+        distribution = self._get_action_dist_from_latent(latent_pi)
+        if deterministic:
+            action = distribution.mode()
+        else:
+            action = distribution.sample()
+        action = action.cpu().detach().numpy().flatten()
+        return action, state
+    
+class FeedforwardFeaturesExtractor(BaseFeaturesExtractor):
+    def __init__(self, observation_space: Box, extra_state_features=0, dims=3, complex=True):
+        self.n_state_features = 10 + extra_state_features
+        self.n_ff_features = observation_space.shape[0] - self.n_state_features
+        self.dims = dims
+        self.complex = complex
+
+        assert self.n_ff_features % self.dims == 0
+
+        ff_feature_dim = (self.n_ff_features // self.dims - 4) * 8
+        if complex:
+            ff_feature_dim = (self.n_ff_features // self.dims - 6) * 8
+
+        features_dim = self.n_state_features + ff_feature_dim
+
+        super().__init__(observation_space, features_dim)
+
+        if self.complex:
+            self.layer1 = torch.nn.Conv1d(in_channels=self.dims, out_channels=32, kernel_size=3, stride=1)
+            self.act1 = torch.nn.ReLU()
+            self.layer2 = torch.nn.Conv1d(in_channels=32, out_channels=32, kernel_size=3)
+            self.layer3 = torch.nn.Conv1d(in_channels=32, out_channels=8, kernel_size=3)
+        else:
+            self.layer1 = torch.nn.Conv1d(in_channels=self.dims, out_channels=8, kernel_size=3, stride=1)
+            self.act1 = torch.nn.ReLU()
+            self.layer2 = torch.nn.Conv1d(in_channels=8, out_channels=8, kernel_size=3)
+        
+    def forward(self, full_obs):
+        batch_dim = full_obs.shape[0]
+        obs_dim = full_obs.shape[1]
+
+        ff_features = full_obs[:, self.n_state_features:].reshape(batch_dim, (obs_dim - self.n_state_features) // self.dims, self.dims)
+        # channel first
+        ff_features = torch.permute(ff_features, (0, 2, 1))
+
+        obs_features = full_obs[:, :self.n_state_features]
+
+        if self.complex:
+            x = self.act1(self.layer1(ff_features))
+            x = self.act1(self.layer2(x))
+            x = self.layer3(x)
+        else:
+            x = self.act1(self.layer1(ff_features))
+            x = self.layer2(x)
+        
+        x = torch.flatten(x, start_dim=1)
+
+        output = torch.cat([obs_features, x], axis=1)
+
+        return output
+
+class AdaptationNetwork(nn.Module):
+    def __init__(self, input_dims, e_dims, complex=True):
+        super().__init__()
+
+        self.complex = complex
+        print('Adaptation Net complex', complex)
+        
+        channels = 32
+        if self.complex:
+            channels = 64
+        self.layer1 = torch.nn.Conv1d(in_channels=input_dims, out_channels=channels, kernel_size=8, stride=2)
+        self.act1 = torch.nn.ReLU()
+        self.layer2 = torch.nn.Conv1d(in_channels=channels, out_channels=channels, kernel_size=5)
+        self.layer3 = torch.nn.Conv1d(in_channels=channels, out_channels=channels, kernel_size=5)
+        
+        if self.complex:
+            self.fc = torch.nn.Linear(in_features=14*channels, out_features=32)
+            self.fc2 = torch.nn.Linear(in_features=32, out_features=32)
+            self.fc3 = torch.nn.Linear(in_features=32, out_features=e_dims)
+        else:
+            self.fc = torch.nn.Linear(in_features=14*32, out_features=e_dims)
+        
+    def forward(self, x):
+        x = self.act1(self.layer1(x))
+        x = self.act1(self.layer2(x))
+        x = self.act1(self.layer3(x))
+        
+        x = torch.flatten(x, start_dim=1, end_dim=2)
+        if self.complex:
+            x = self.act1(self.fc(x))
+            x = self.act1(self.fc2(x))
+            x = self.fc3(x)
+        else:
+            x = self.fc(x)
+
+        return x

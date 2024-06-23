@@ -529,9 +529,11 @@ class QuadrotorTrackingEnv(gym.Env):
             pos = self.vehicle_state['x']
             rot = Rotation.from_quat(self.vehicle_state['q'])
 
-            fb_term = pos - rot.inv().apply(self.ref.update(self.t)['x'])
+            # fb_term = pos - rot.inv().apply(self.ref.update(self.t)['x'])
+            fb_term = rot.inv().apply(self.ref.update(self.t)['x'] - pos) # corrected version
             if self.time_horizon > 0:
-                futures = np.hstack([pos - rot.inv().apply(self.ref.update(self.t + i*self.t_step)['x']) for i in range(self.time_horizon)])
+                # futures = np.hstack([pos - rot.inv().apply(self.ref.update(self.t + i*self.t_step)['x']) for i in range(self.time_horizon)])
+                futures = np.hstack([rot.inv().apply(self.ref.update(self.t + i*self.t_step)['x'] - pos) for i in range(self.time_horizon)]) # corrected version
                 obs = np.hstack([fb_term, self.current_state[3:], futures])
             else:
                 obs = np.hstack([fb_term, self.current_state[3:]])
