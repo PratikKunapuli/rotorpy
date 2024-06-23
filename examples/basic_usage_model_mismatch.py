@@ -13,6 +13,7 @@ from rotorpy.vehicles.crazyflie_params import quad_params
 
 # You will also need a controller (currently there is only one) that works for your vehicle. 
 from rotorpy.controllers.quadrotor_control import SE3Control
+from rotorpy.controllers.debug_controller import DebugController
 
 # And a trajectory generator
 from rotorpy.trajectories.hover_traj import HoverTraj
@@ -50,7 +51,8 @@ Instantiation
 
 sim_dt = 0.01
 
-trajectory = TwoDLissajous(A=2, B=1, a=1, b=2, delta=0, height=1, yaw_bool=False, dt=sim_dt)
+# trajectory = TwoDLissajous(A=2, B=1, a=1, b=2, delta=0, height=1, yaw_bool=False, dt=sim_dt)
+trajectory = HoverTraj()
 
 
 # Obstacle maps can be loaded in from a JSON file using the World.from_file(path) method. Here we are loading in from 
@@ -65,17 +67,18 @@ assumed_params['mass'] = 0.03
 quad_params['mass'] = 0.04 # 2 grams heavier
 
 # "world" is an optional argument. If you don't load a world it'll just provide an empty playground! 
+controller = DebugController(quad_params)
 
 # An instance of the simulator can be generated as follows: 
-sim_instance = Environment(vehicle=MultirotorModelMismatch(quad_params, control_abstraction='cmd_ctbr', assumed_quad_params=assumed_params),           # vehicle object, must be specified. 
-                           controller=SE3Control(quad_params),        # controller object, must be specified.
+sim_instance = Environment(vehicle=MultirotorModelMismatch(quad_params, control_abstraction='cmd_ctatt', assumed_quad_params=None),           # vehicle object, must be specified. 
+                           controller=controller,        # controller object, must be specified.
                            trajectory=trajectory,                     # trajectory object, must be specified.
                            wind_profile=NoWind(),               # OPTIONAL: wind profile object, if none is supplied it will choose no wind. 
                            sim_rate     = int(1/sim_dt),                        # OPTIONAL: The update frequency of the simulator in Hz. Default is 100 Hz.
                            imu          = None,                       # OPTIONAL: imu sensor object, if none is supplied it will choose a default IMU sensor.
                            mocap        = None,                       # OPTIONAL: mocap sensor object, if none is supplied it will choose a default mocap.  
                            estimator    = None,                       # OPTIONAL: estimator object
-                           world        = world,                      # OPTIONAL: the world, same name as the file in rotorpy/worlds/, default (None) is empty world
+                           world        = None,                      # OPTIONAL: the world, same name as the file in rotorpy/worlds/, default (None) is empty world
                            safety_margin= 0.25                        # OPTIONAL: defines the radius (in meters) of the sphere used for collision checking
                        )
 

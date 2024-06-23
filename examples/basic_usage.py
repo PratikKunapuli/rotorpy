@@ -12,6 +12,7 @@ from rotorpy.vehicles.crazyflie_params import quad_params
 
 # You will also need a controller (currently there is only one) that works for your vehicle. 
 from rotorpy.controllers.quadrotor_control import SE3Control
+from rotorpy.controllers.debug_controller import DebugController
 
 # And a trajectory generator
 from rotorpy.trajectories.hover_traj import HoverTraj
@@ -49,7 +50,8 @@ Instantiation
 
 sim_dt = 0.01
 
-trajectory = TwoDLissajous(A=2, B=2, a=0.25, b=2, delta=0, height=1, yaw_bool=False, dt=sim_dt)
+# trajectory = TwoDLissajous(A=2, B=2, a=0.25, b=2, delta=0, height=1, yaw_bool=False, dt=sim_dt)
+trajectory = HoverTraj()
 
 
 # Obstacle maps can be loaded in from a JSON file using the World.from_file(path) method. Here we are loading in from 
@@ -59,9 +61,12 @@ world = World.from_file(os.path.abspath(os.path.join(os.path.dirname(__file__),'
 world = None
 # "world" is an optional argument. If you don't load a world it'll just provide an empty playground! 
 
+# controller = SE3Control(quad_params)
+controller = DebugController(quad_params)
+
 # An instance of the simulator can be generated as follows: 
-sim_instance = Environment(vehicle=Multirotor(quad_params, control_abstraction='cmd_ctbr'),           # vehicle object, must be specified. 
-                           controller=SE3Control(quad_params),        # controller object, must be specified.
+sim_instance = Environment(vehicle=Multirotor(quad_params, control_abstraction='cmd_ctatt'),           # vehicle object, must be specified. 
+                           controller=controller,        # controller object, must be specified.
                            trajectory=trajectory,                     # trajectory object, must be specified.
                            wind_profile=NoWind(),               # OPTIONAL: wind profile object, if none is supplied it will choose no wind. 
                            sim_rate     = int(1/sim_dt),                        # OPTIONAL: The update frequency of the simulator in Hz. Default is 100 Hz.
