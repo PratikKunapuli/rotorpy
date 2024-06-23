@@ -10,6 +10,7 @@ from rotorpy.vehicles.crazyflie_params import quad_params as crazyflie_params
 from rotorpy.learning.quadrotor_reward_functions import hover_reward
 from rotorpy.utils.shapes import Quadrotor
 from rotorpy.trajectories.lissajous_traj import TwoDLissajous
+from rotorpy.utils.flatness import Flatness
 
 import gymnasium as gym
 from gymnasium import spaces
@@ -44,7 +45,7 @@ class QuadrotorTrackingEnv(gym.Env):
 
     metadata = {"render_modes": ["None", "3D", "console"], 
                 "render_fps": 30,
-                "control_modes": ['cmd_motor_speeds', 'cmd_motor_thrusts', 'cmd_ctbr', 'cmd_ctbm', 'cmd_vel']}
+                "control_modes": ['cmd_motor_speeds', 'cmd_motor_thrusts', 'cmd_ctbr', 'cmd_ctbm', 'cmd_vel', 'cmd_ctatt']}
 
     def __init__(self, 
                  initial_state = {'x': np.array([0,0,0]),
@@ -117,7 +118,7 @@ class QuadrotorTrackingEnv(gym.Env):
         self.num_observations = 13
 
         self.time_horizon = self.experiment_dict.get('time_horizon', 0)
-        self.num_observations += 3*(self.time_horizon + 1)# only position for the time horizon future reference points
+        self.num_observations += 3*(self.time_horizon)# only position for the time horizon future reference points
         
         if self.experiment_dict.get('l1_simulation', False):
             self.num_observations += 3
@@ -146,7 +147,6 @@ class QuadrotorTrackingEnv(gym.Env):
             self.action_space = spaces.Box(low = -1, high = 1, shape = (4,), dtype=np.float32)
 
         ######  Min/max values for scaling control outputs.
-
         self.rotor_speed_max = self.quadrotor.rotor_speed_max
         self.rotor_speed_min = self.quadrotor.rotor_speed_min
 
@@ -163,6 +163,10 @@ class QuadrotorTrackingEnv(gym.Env):
         self.max_roll_br = 7.0
         self.max_pitch_br = 7.0 
         self.max_yaw_br = 3.0
+
+        self.max_roll = 0.4*np.pi
+        self.max_pitch = 0.4*np.pi
+        self.max_yaw = np.pi
 
         # Set the maximum speed command (this is hand selected), m/s
         self.max_vel = 3/math.sqrt(3)   # Selected so that at most the max speed is 3 m/s
@@ -204,7 +208,12 @@ class QuadrotorTrackingEnv(gym.Env):
 
         self.rendering = False   # Bool for tracking when the renderer is actually rendering a frame. 
 
-        return 
+        if self.experiment_dict.get('reward', None) is not None:
+            self.flatness_obj = Flatness()
+        else:
+            self.flatness_obj = None
+
+         
 
     def render(self):
         if self.render_mode == '3D':
@@ -217,7 +226,7 @@ class QuadrotorTrackingEnv(gym.Env):
             # Close the plots
             plt.close('all')
     
-    def reset(self, seed=None, initial_state='random', options={'pos_bound': 0.5, 'vel_bound': 0}):
+    def reset(self, seed=None, initial_state='random', options={'pos_bound': 0.5, 'vel_bound': 0.5}):
         """
         Reset the environment
         Inputs:
@@ -258,12 +267,14 @@ class QuadrotorTrackingEnv(gym.Env):
             # Randomly select an initial state for the quadrotor. At least assume it is level. 
             pos = np.random.uniform(low=-options['pos_bound'], high=options['pos_bound'], size=(3,)) + reference_pos
             vel = np.random.uniform(low=-options['vel_bound'], high=options['vel_bound'], size=(3,)) + reference_vel
+
             state = {'x': pos,
                      'v': vel,
                      'q': np.array([0, 0, 0, 1]), # [i,j,k,w]
                      'w': np.zeros(3,),
                      'wind': np.array([0,0,0]),  # Since wind is handled elsewhere, this value is overwritten
                      'rotor_speeds': np.array([1788.53, 1788.53, 1788.53, 1788.53])}
+                    
 
         elif initial_state == 'deterministic':
             state = self.initial_state
@@ -319,6 +330,10 @@ class QuadrotorTrackingEnv(gym.Env):
         self.max_roll_moment = self.max_thrust * np.abs(self.assumed_quad_params['rotor_pos']['r1'][1])
         self.max_pitch_moment = self.max_thrust * np.abs(self.assumed_quad_params['rotor_pos']['r1'][0])
         self.max_yaw_moment = self.assumed_quad_params['k_m'] * self.rotor_speed_max**2
+
+        # Find the hover thrust and then scale into -1 to 1 for min to max thrust
+        hover_thrust = self.assumed_quad_params['mass'] * 9.81 / self.quadrotor.num_rotors
+        self.hover_thrust = np.interp(hover_thrust, [self.min_thrust, self.max_thrust], [-1, 1])
 
         # Set the initial state. 
         self.vehicle_state = state
@@ -458,6 +473,18 @@ class QuadrotorTrackingEnv(gym.Env):
             elif self.control_mode == 'cmd_vel':
                 # Scale the velcoity to min and max values. 
                 control_dict['cmd_v'] = np.interp(action, [-1,1], [-self.max_vel, self.max_vel])
+            
+            elif self.control_mode == 'cmd_ctatt':
+                cmd_thrust = np.interp(action[0], [-1, 1], [self.quadrotor.num_rotors*self.min_thrust, self.quadrotor.num_rotors*self.max_thrust])
+
+                roll = np.interp(action[1], [-1,1], [-self.max_roll, self.max_roll])
+                pitch = np.interp(action[2], [-1,1], [-self.max_pitch, self.max_pitch])
+                yaw = np.interp(action[3], [-1,1], [-self.max_yaw, self.max_yaw])
+
+                cmd_q = Rotation.from_euler('ZYX', [roll, pitch, yaw]).as_quat() # guessing the euler convention here
+
+                control_dict['cmd_thrust'] = cmd_thrust
+                control_dict['cmd_q'] = cmd_q
 
             return control_dict
     
@@ -471,7 +498,7 @@ class QuadrotorTrackingEnv(gym.Env):
             the current reward.
         """
 
-        return self.reward_fn(state, ref, action, self.t)
+        return self.reward_fn(state, ref, action, self.t, hover_thrust=self.hover_thrust, flatness_obj=self.flatness_obj)
     
     def safety_exit(self):
         """
@@ -498,7 +525,6 @@ class QuadrotorTrackingEnv(gym.Env):
     
     def _get_obs(self):
         self.current_state = np.hstack([self.vehicle_state['x'], self.vehicle_state['v'], self.vehicle_state['q'], self.vehicle_state['w']])
-        obs = self.current_state
         if self.experiment_dict.get('fb_body_frame', True):
             pos = self.vehicle_state['x']
             rot = Rotation.from_quat(self.vehicle_state['q'])
@@ -506,16 +532,17 @@ class QuadrotorTrackingEnv(gym.Env):
             fb_term = pos - rot.inv().apply(self.ref.update(self.t)['x'])
             if self.time_horizon > 0:
                 futures = np.hstack([pos - rot.inv().apply(self.ref.update(self.t + i*self.t_step)['x']) for i in range(self.time_horizon)])
-                obs = np.hstack([obs, fb_term, futures])
+                obs = np.hstack([fb_term, self.current_state[3:], futures])
             else:
-                obs = np.hstack([obs, fb_term])
+                obs = np.hstack([fb_term, self.current_state[3:]])
         else:
+            pos = self.vehicle_state['x']
             fb_term = pos - self.ref.update(self.t)['x']
             if self.time_horizon > 0:
                 futures = np.hstack([self.ref.update(self.t + i*self.t_step)['x'] for i in range(self.time_horizon)])
-                obs = np.hstack([obs, fb_term, futures])
+                obs = np.hstack([fb_term, self.current_state[3:], futures])
             else:
-                obs = np.hstack([obs, fb_term])
+                obs = np.hstack([fb_term, self.current_state[3:]])
 
         if self.experiment_dict.get('l1_simulation', False):
             d_hat = self.l1_simulation()
