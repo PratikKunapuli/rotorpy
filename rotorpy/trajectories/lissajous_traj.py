@@ -42,11 +42,13 @@ class TwoDLissajous(object):
         self.fill_buffer(t=0)
 
     def gen_coefficients(self):
-        self.A = np.random.uniform(-2, 2)
-        self.B = np.random.uniform(-2, 2)
+        # self.A = np.random.uniform(-2, 2)
+        # self.B = np.random.uniform(-2, 2)
+        self.A = 1
+        self.B = 1
         self.a = np.random.uniform(0.5, 2)
         self.b = np.random.uniform(0.5, 2)
-        self.delta = np.random.uniform(0, 2*np.pi)
+        self.delta = np.random.uniform(0, np.pi)
 
     def reset(self):
         """
@@ -65,7 +67,7 @@ class TwoDLissajous(object):
 
     def update(self, t):
         """
-        Given the present time, return the desired flat output and derivatives.
+        Given the present time, return the desired flat output and derivatives.1
 
         Inputs
             t, time, s
@@ -79,6 +81,17 @@ class TwoDLissajous(object):
                 yaw,      yaw angle, rad
                 yaw_dot,  yaw rate, rad/s
         """
+        
+        current_ref = self.update_once(t=t)
+        self.fill_buffer(t=t)
+
+
+        flat_output = { 'x': current_ref['x'], 'x_dot': current_ref['x_dot'], 'x_ddot': current_ref['x_ddot'], 'x_dddot': current_ref['x_dddot'], 'x_ddddot': current_ref['x_ddddot'],
+                        'yaw': current_ref['yaw'], 'yaw_dot': current_ref['yaw_dot'], 'yaw_ddot': current_ref['yaw_ddot'], 'future_pos': self.future_buffer}
+    
+        return flat_output
+    
+    def update_once(self, t=0):
         x        = np.array([self.A*np.sin(self.a*t + self.delta),
                              self.B*np.sin(self.b*t),
                              self.height])
@@ -103,14 +116,27 @@ class TwoDLissajous(object):
             yaw = 0
             yaw_dot = 0
             yaw_ddot = 0
-
+        
         flat_output = { 'x':x, 'x_dot':x_dot, 'x_ddot':x_ddot, 'x_dddot':x_dddot, 'x_ddddot':x_ddddot,
-                        'yaw':yaw, 'yaw_dot':yaw_dot, 'yaw_ddot':yaw_ddot, 'future_pos': self.future_buffer}
+                        'yaw':yaw, 'yaw_dot':yaw_dot, 'yaw_ddot':yaw_ddot}
         return flat_output
-    
+
+
     def fill_buffer(self, t=0):
         """
         This function fills the buffer with future desired states. 
         """
         for i in range(10):
-            self.future_buffer[i] = self.update(t + i*self.dt)['x']
+            self.future_buffer[i] = self.update_once(t + i*self.dt)['x']
+
+if __name__ == "__main__":
+    traj = TwoDLissajous(A=1, B=1, a = 2, b=0.5, delta=0, height=1, yaw_bool=False, dt=0.01)
+    # traj.reset()
+    pos = []
+    for i in range(300):
+        pos.append(traj.update(i*0.01)['x'])
+    
+    import matplotlib.pyplot as plt
+    pos = np.array(pos)
+    plt.plot(pos[:,0], pos[:,1])
+    plt.savefig('lissajous.png')
